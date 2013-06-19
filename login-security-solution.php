@@ -6,7 +6,7 @@
  * Description: Requires very strong passwords, repels brute force login attacks, prevents login information disclosures, expires idle sessions, notifies admins of attacks and breaches, permits administrators to disable logins for maintenance or emergency reasons and reset all passwords.
  *
  * Plugin URI: http://wordpress.org/extend/plugins/login-security-solution/
- * Version: 0.37.0
+ * Version: 0.39.0
  *         (Remember to change the VERSION constant, below, as well!)
  * Author: Daniel Convissor
  * Author URI: http://www.analysisandsolutions.com/
@@ -42,7 +42,7 @@ class login_security_solution {
 	/**
 	 * This plugin's version
 	 */
-	const VERSION = '0.37.0';
+	const VERSION = '0.39.0';
 
 	/**
 	 * This plugin's table name prefix
@@ -58,6 +58,7 @@ class login_security_solution {
 	const E_EMPTY = 'pw-empty';
 	const E_NUMBER = 'pw-number';
 	const E_PUNCT = 'pw-punct';
+	const E_REUSED = 'pw-reused';
 	const E_SEQ_CHAR = 'pw-seqchar';
 	const E_SEQ_KEY = 'pw-seqkey';
 	const E_SHORT = 'pw-short';
@@ -736,6 +737,12 @@ class login_security_solution {
 			return -1;
 		}
 
+		if ($this->is_pw_reused($user_pass, $user->ID)) {
+			###$this->log(__FUNCTION__, "password reused");
+			$this->redirect_to_login(self::E_REUSED, false, 'rp');
+			return -2;
+		}
+
 		$this->save_verified_ip($user->ID, $this->get_ip());
 		$this->process_pw_metadata($user->ID, $user_pass);
 	}
@@ -809,9 +816,8 @@ class login_security_solution {
 				return null;
 			}
 			if ($this->is_pw_reused($user->user_pass, $user->ID)) {
-				$this->load_plugin_textdomain();
 				$errors->add(self::ID,
-					$this->err(__("Passwords can not be reused.", self::ID)),
+					$this->err($this->msg(self::E_REUSED)),
 					array('form-field' => 'pass1')
 				);
 				return false;
@@ -864,6 +870,9 @@ class login_security_solution {
 		}
 		if ($this->user_pass === null) {
 			###$this->log(__FUNCTION__, "authenticate filter not called");
+			###global $wp_filter;
+			###$this->log(__FUNCTION__, 'authenticate filters', $wp_filter['authenticate']);
+			###$this->log(__FUNCTION__, 'backtrace', debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS));
 			die(self::NAME . ": authenticate filter not called");
 		}
 		###$this->log(__FUNCTION__, $user_name);
@@ -1021,6 +1030,14 @@ class login_security_solution {
 			$email = get_site_option('admin_email');
 		}
 		return $email;
+	}
+
+	/**
+	 * Removes HTML special characters from blogname
+	 * @return string
+	 */
+	protected function get_blogname() {
+		return wp_specialchars_decode(get_option('blogname'), ENT_QUOTES);
 	}
 
 	/**
@@ -1580,7 +1597,7 @@ Password MD5                 %5d     %s
 	 */
 	protected function is_pw_like_bloginfo($pw) {
 		// Note: avoiding get_bloginfo() because it's very expensive.
-		if ($this->has_match($pw, get_option('blogname'))) {
+		if ($this->has_match($pw, $this->get_blogname())) {
 			return true;
 		}
 		if ($this->has_match($pw, get_option('siteurl'))) {
@@ -1865,6 +1882,7 @@ Password MD5                 %5d     %s
 	 * @return string
 	 */
 	protected function msg($code) {
+		$this->load_plugin_textdomain();
 		switch ($code) {
 			case self::E_ASCII:
 				return __("Passwords must use ASCII characters.", self::ID);
@@ -1880,6 +1898,8 @@ Password MD5                 %5d     %s
 				return sprintf(__("Passwords must either contain numbers or be %d characters long.", self::ID), $this->options['pw_complexity_exemption_length']);
 			case self::E_PUNCT:
 				return sprintf(__("Passwords must either contain punctuation marks / symbols or be %d characters long.", self::ID), $this->options['pw_complexity_exemption_length']);
+			case self::E_REUSED:
+				return __("Passwords can not be reused.", self::ID);
 			case self::E_SEQ_CHAR:
 				return __("Passwords can't have that many sequential characters.", self::ID);
 			case self::E_SEQ_KEY:
@@ -2041,7 +2061,7 @@ Password MD5                 %5d     %s
 
 		$to = $this->sanitize_whitespace($this->get_admin_email());
 
-		$blog = get_option('blogname');
+		$blog = $this->get_blogname();
 		$subject = sprintf(__("POTENTIAL INTRUSION AT %s", self::ID), $blog);
 		$subject = $this->sanitize_whitespace($subject);
 
@@ -2084,7 +2104,7 @@ Password MD5                 %5d     %s
 
 		$to = $this->sanitize_whitespace($user->user_email);
 
-		$blog = get_option('blogname');
+		$blog = $this->get_blogname();
 		$subject = sprintf(__("VERIFY YOU LOGGED IN TO %s", self::ID), $blog);
 		$subject = $this->sanitize_whitespace($subject);
 
@@ -2127,7 +2147,7 @@ Password MD5                 %5d     %s
 
 		$to = $this->sanitize_whitespace($this->get_admin_email());
 
-		$blog = get_option('blogname');
+		$blog = $this->get_blogname();
 		$subject = sprintf(__("ATTACK HAPPENING TO %s", self::ID), $blog);
 		$subject = $this->sanitize_whitespace($subject);
 
@@ -2636,8 +2656,6 @@ Password MD5                 %5d     %s
 	 * @return bool
 	 */
 	public function validate_pw($user, &$errors = null) {
-		$this->load_plugin_textdomain();
-
 		if (is_object($user)) {
 			$all_tests = true;
 
