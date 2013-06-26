@@ -6,7 +6,7 @@
  * Description: Requires very strong passwords, repels brute force login attacks, prevents login information disclosures, expires idle sessions, notifies admins of attacks and breaches, permits administrators to disable logins for maintenance or emergency reasons and reset all passwords.
  *
  * Plugin URI: http://wordpress.org/extend/plugins/login-security-solution/
- * Version: 0.39.0
+ * Version: 0.41.0
  *         (Remember to change the VERSION constant, below, as well!)
  * Author: Daniel Convissor
  * Author URI: http://www.analysisandsolutions.com/
@@ -42,7 +42,7 @@ class login_security_solution {
 	/**
 	 * This plugin's version
 	 */
-	const VERSION = '0.39.0';
+	const VERSION = '0.41.0';
 
 	/**
 	 * This plugin's table name prefix
@@ -68,9 +68,11 @@ class login_security_solution {
 
 	const LOGIN_FORCE_PW_CHANGE = 2;
 	const LOGIN_NOTIFY = 4;
-	const LOGIN_VERIFIED_IP = 8;
+	const LOGIN_VERIFIED_IP_SAFE = 8;
 	const LOGIN_UNKNOWN_IP = 16;
 	const LOGIN_CLEAN = 32;
+	const LOGIN_VERIFIED_IP_NEW = 64;
+	const LOGIN_VERIFIED_IP_OLD = 128;
 
 	/**
 	 * Is the dict command available?
@@ -846,7 +848,7 @@ class login_security_solution {
 	 * @uses login_security_solution::process_login_success()  to, uh, process
 	 */
 	public function wp_login($user_name, $user) {
-		###$this->log(__FUNCTION__, $user_name);
+		###$this->log(__FUNCTION__, is_object($user) ? $user->user_name : 'ERROR: non-object');
 		return $this->process_login_success($user);
 	}
 
@@ -867,6 +869,10 @@ class login_security_solution {
 			###$this->log(__FUNCTION__, "$user_name skip login failed");
 			$this->skip_wp_login_failed = false;
 			return -1;
+		}
+		if (!$user_name) {
+			###$this->log(__FUNCTION__, "empty user_name");
+			return -2;
 		}
 		if ($this->user_pass === null) {
 			###$this->log(__FUNCTION__, "authenticate filter not called");
@@ -994,6 +1000,7 @@ class login_security_solution {
 	 * @return bool
 	 */
 	protected function delete_pw_force_change($user_ID) {
+		###$this->log(__FUNCTION__, $user_ID);
 		return delete_user_meta($user_ID, $this->umk_pw_force_change);
 	}
 
@@ -1191,7 +1198,20 @@ Password MD5                 %5d     %s
 	 * @return bool  does the user need to change their password?
 	 */
 	protected function get_pw_force_change($user_ID) {
+		###$this->log(__FUNCTION__, $user_ID);
 		return (bool) get_user_meta($user_ID, $this->umk_pw_force_change, true);
+	}
+
+	/**
+	 * Gets the server's request time
+	 *
+	 * Provided for overloading by unit tests so they can create multiple
+	 * entries in one request.
+	 *
+	 * @return int  $_SERVER['REQUEST_TIME']
+	 */
+	protected function get_time() {
+		return $_SERVER['REQUEST_TIME'];
 	}
 
 	/**
@@ -2278,15 +2298,34 @@ Password MD5                 %5d     %s
 		 * if the user's current IP address is not involved with the
 		 * recent failed logins and the current IP address has been verified.
 		 */
-		if ($fails['network_ip'] <= $this->options['login_fail_breach_pw_force_change']
-			&& in_array($ip, $this->get_verified_ips($user->ID)))
-		{
-			// Use <= instead of <, above, in case
-			// login_fail_breach_pw_force_change = 0.
 
-			###$this->log(__FUNCTION__, "$user->user_login verified IP");
-			$flag += self::LOGIN_VERIFIED_IP;
-			$verified_ip = true;
+		$ip_time = array_search($ip, $this->get_verified_ips($user->ID));
+		###$this->log(__FUNCTION__, 'ip_time', $ip_time ? $ip_time : 'false');
+		if ($ip_time !== false) {
+			if ($fails['network_ip'] <= $this->options['login_fail_breach_pw_force_change'])
+			{
+				// Use <= instead of <, above, in case
+				// login_fail_breach_pw_force_change = 0.
+
+				// Not part of attack.
+				###$this->log(__FUNCTION__, "$user->user_login verified IP, not part of attack");
+				$flag += self::LOGIN_VERIFIED_IP_SAFE;
+				$verified_ip = true;
+			} else {
+				$age = $this->get_time() - $ip_time;
+				$max_age_permitted = $this->options['login_fail_minutes'] * 60;
+				if ($age < $max_age_permitted) {
+					// Same IP as "attacker," but IP verified recently.
+					###$this->log(__FUNCTION__, "$user->user_login, part of attack, but newly verified IP ($age < $max_age_permitted)");
+					$flag += self::LOGIN_VERIFIED_IP_NEW;
+					$verified_ip = true;
+				} else {
+					// Same IP as "attacker," and IP verified a while ago.
+					###$this->log(__FUNCTION__, "$user->user_login, part of attack, old verified IP ($age >= $max_age_permitted)");
+					$flag += self::LOGIN_VERIFIED_IP_OLD;
+					$verified_ip = false;
+				}
+			}
 		} else {
 			###$this->log(__FUNCTION__, "$user->user_login non-verified IP");
 			$flag += self::LOGIN_UNKNOWN_IP;
@@ -2443,11 +2482,13 @@ Password MD5                 %5d     %s
 	/**
 	 * Stores the user's current IP address
 	 *
-	 * Note: saves up to 10 adddresses, duplicates are not stored.
+	 * Note: saves up to 20 adddresses, duplicates are not stored.
+	 *
+	 * Note: storing IP's in array values for backwards compatibility.
 	 *
 	 * @param int $user_ID  the user's id number
 	 * @param string $new_ip  the ip address to add
-	 * @return mixed  true on success, 1 if IP is already stored, -1 if IP empty
+	 * @return mixed  true on success, -1 if IP empty
 	 */
 	protected function save_verified_ip($user_ID, $new_ip) {
 		if (!$new_ip) {
@@ -2455,16 +2496,19 @@ Password MD5                 %5d     %s
 		}
 
 		$ips = $this->get_verified_ips($user_ID);
+		$time = array_search($new_ip, $ips);
 
-		if (in_array($new_ip, $ips)) {
-			return 1;
+		if ($time !== false) {
+			// Replace time stamp.
+			unset($ips[$time]);
 		}
+		$ips[$this->get_time()] = $new_ip;
 
-		$ips[] = $new_ip;
-
-		$cut = count($ips) - 10;
-		if ($cut > 0) {
-			array_splice($ips, 0, $cut);
+		if (count($ips) > 20) {
+			// Drop oldest (first) element to keep array from getting to big.
+			// Can't use array_shift() because it reindexes the array
+			$first_key = key($ips);
+			unset($ips[$first_key]);
 		}
 
 		update_user_meta($user_ID, $this->umk_verified_ips, $ips);
@@ -2520,6 +2564,7 @@ Password MD5                 %5d     %s
 	 *                   if error
 	 */
 	protected function set_pw_force_change($user_ID) {
+		###$this->log(__FUNCTION__, $user_ID);
 		return update_user_meta($user_ID, $this->umk_pw_force_change, 1);
 	}
 
