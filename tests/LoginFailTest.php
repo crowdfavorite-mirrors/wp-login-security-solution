@@ -5,7 +5,7 @@
  *
  * @package login-security-solution
  * @author Daniel Convissor <danielc@analysisandsolutions.com>
- * @copyright The Analysis and Solutions Company, 2012
+ * @copyright The Analysis and Solutions Company, 2012-2014
  * @license http://www.gnu.org/licenses/gpl-2.0.html GPLv2
  */
 
@@ -19,7 +19,7 @@ require_once dirname(__FILE__) .  '/TestCase.php';
  *
  * @package login-security-solution
  * @author Daniel Convissor <danielc@analysisandsolutions.com>
- * @copyright The Analysis and Solutions Company, 2012
+ * @copyright The Analysis and Solutions Company, 2012-2014
  * @license http://www.gnu.org/licenses/gpl-2.0.html GPLv2
  */
 class LoginFailTest extends TestCase {
@@ -72,6 +72,18 @@ class LoginFailTest extends TestCase {
 
 		self::$lss->insert_fail($this->ip, $this->user_name, 'other md5');
 		$this->check_fail_record($this->ip, $this->user_name, 'other md5');
+	}
+
+	/**
+	 * @depends test_insert_fail
+	 */
+	public function test_is_login_fail_exact_match__login_fail_minutes_disabled() {
+		$options = self::$lss->options;
+		$options['login_fail_minutes'] = 0;
+		self::$lss->options = $options;
+
+		$actual = self::$lss->is_login_fail_exact_match($this->ip, $this->user_name, $this->pass_md5);
+		$this->assertFalse($actual, 'Expect no match, feature disabled.');
 	}
 
 	/**
@@ -482,6 +494,26 @@ class LoginFailTest extends TestCase {
 
 		$actual = self::$lss->get_pw_force_change($this->user->ID);
 		$this->assertTrue($actual, 'get_pw_force_change() return value...');
+	}
+
+	/**
+	 * @depends test_process_login_fail__post_threshold
+	 */
+	public function test_wp_login__login_fail_minutes_disabled() {
+		$options = self::$lss->options;
+		$options['login_fail_minutes'] = 0;
+		self::$lss->options = $options;
+
+		$expected = array(
+			'total' => '0',
+			'network_ip' => null,
+			'user_name' => null,
+			'pass_md5' => null,
+		);
+
+		$actual = self::$lss->get_login_fail('1.2.3', 'nunca', 'nada');
+
+		$this->assertEquals($expected, $actual);
 	}
 
 	/**

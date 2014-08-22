@@ -8,7 +8,7 @@
  * @link http://wordpress.org/extend/plugins/login-security-solution/
  * @license http://www.gnu.org/licenses/gpl-2.0.html GPLv2
  * @author Daniel Convissor <danielc@analysisandsolutions.com>
- * @copyright The Analysis and Solutions Company, 2012
+ * @copyright The Analysis and Solutions Company, 2012-2014
  */
 
 /**
@@ -19,7 +19,7 @@
  * @link http://wordpress.org/extend/plugins/login-security-solution/
  * @license http://www.gnu.org/licenses/gpl-2.0.html GPLv2
  * @author Daniel Convissor <danielc@analysisandsolutions.com>
- * @copyright The Analysis and Solutions Company, 2012
+ * @copyright The Analysis and Solutions Company, 2012-2014
  */
 class login_security_solution_admin extends login_security_solution {
 	/**
@@ -272,7 +272,7 @@ class login_security_solution_admin extends login_security_solution {
 			'login_fail_minutes' => array(
 				'group' => 'login',
 				'label' => __("Match Time", self::ID),
-				'text' => __("How far back, in minutes, should login failures look for matching data?", self::ID),
+				'text' => __("How far back, in minutes, should login failures look for matching data? 0 disables Login Failure slow downs, notifications and breach confirmations.", self::ID),
 				'type' => 'int',
 			),
 			'login_fail_tier_2' => array(

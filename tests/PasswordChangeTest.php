@@ -5,7 +5,7 @@
  *
  * @package login-security-solution
  * @author Daniel Convissor <danielc@analysisandsolutions.com>
- * @copyright The Analysis and Solutions Company, 2012
+ * @copyright The Analysis and Solutions Company, 2012-2014
  * @license http://www.gnu.org/licenses/gpl-2.0.html GPLv2
  */
 
@@ -19,7 +19,7 @@ require_once dirname(__FILE__) .  '/TestCase.php';
  *
  * @package login-security-solution
  * @author Daniel Convissor <danielc@analysisandsolutions.com>
- * @copyright The Analysis and Solutions Company, 2012
+ * @copyright The Analysis and Solutions Company, 2012-2014
  * @license http://www.gnu.org/licenses/gpl-2.0.html GPLv2
  */
 class PasswordChangeTest extends TestCase {
@@ -55,6 +55,9 @@ class PasswordChangeTest extends TestCase {
 		if (!extension_loaded('mbstring')) {
 			$this->user->user_pass = self::$pass_1;
 		}
+
+		// First remove it.  Some bug in WP 3.8 causes set or get to fail.
+		self::$lss->delete_pw_force_change($this->user->ID);
 
 		self::$lss->set_pw_force_change($this->user->ID);
 		$actual = self::$lss->get_pw_force_change($this->user->ID);

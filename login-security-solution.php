@@ -6,7 +6,7 @@
  * Description: Requires very strong passwords, repels brute force login attacks, prevents login information disclosures, expires idle sessions, notifies admins of attacks and breaches, permits administrators to disable logins for maintenance or emergency reasons and reset all passwords.
  *
  * Plugin URI: http://wordpress.org/extend/plugins/login-security-solution/
- * Version: 0.42.0
+ * Version: 0.45.0
  *         (Remember to change the VERSION constant, below, as well!)
  * Author: Daniel Convissor
  * Author URI: http://www.analysisandsolutions.com/
@@ -26,7 +26,7 @@ $GLOBALS['login_security_solution'] = new login_security_solution;
  * @link http://wordpress.org/extend/plugins/login-security-solution/
  * @license http://www.gnu.org/licenses/gpl-2.0.html GPLv2
  * @author Daniel Convissor <danielc@analysisandsolutions.com>
- * @copyright The Analysis and Solutions Company, 2012
+ * @copyright The Analysis and Solutions Company, 2012-2014
  */
 class login_security_solution {
 	/**
@@ -42,7 +42,7 @@ class login_security_solution {
 	/**
 	 * This plugin's version
 	 */
-	const VERSION = '0.42.0';
+	const VERSION = '0.45.0';
 
 	/**
 	 * This plugin's table name prefix
@@ -460,7 +460,7 @@ class login_security_solution {
 			return $user;
 		}
 
-		$process = $this->process_login_success($user);
+		$this->process_login_success($user);
 
 		if ($this->check(null, $user) !== true) {
 			###$this->log(__FUNCTION__, "$user_name check failed");
@@ -941,7 +941,11 @@ class login_security_solution {
 
 		if (!defined('LOGIN_SECURITY_SOLUTION_TESTING')) {
 			// Keep login failures from becoming denial of service attacks.
-			mysql_close($wpdb->dbh);
+			if (empty($wpdb->use_mysqli)) {
+				mysql_close($wpdb->dbh);
+			} else {
+				mysqli_close($wpdb->dbh);
+			}
 
 			sleep($this->sleep);
 
@@ -1089,6 +1093,16 @@ class login_security_solution {
 	protected function get_login_fail($network_ip, $user_name, $pass_md5) {
 		global $wpdb;
 
+		if (!$this->options['login_fail_minutes']) {
+			###$this->log(__FUNCTION__, 'Login failure tracking disabled');
+			return array(
+				'total' => '0',
+				'network_ip' => null,
+				'user_name' => null,
+				'pass_md5' => null,
+			);
+		}
+
 		$wpdb->escape_by_ref($user_name);
 		$wpdb->escape_by_ref($pass_md5);
 
@@ -1169,6 +1183,12 @@ class login_security_solution {
 	protected function get_notify_counts($network_ip, $user_name, $pass_md5,
 			$fails)
 	{
+		if (strpos($network_ip, ':') === false) {
+			$network_ip .= '.*';
+		} else {
+			$network_ip .= ':*';
+		}
+
 		return sprintf(__("
 Component                    Count     Value from Current Attempt
 ------------------------     -----     --------------------------------
@@ -1459,6 +1479,11 @@ Password MD5                 %5d     %s
 	 */
 	protected function is_login_fail_exact_match($ip, $user_name, $pass_md5) {
 		global $wpdb;
+
+		if (!$this->options['login_fail_minutes']) {
+			###$this->log(__FUNCTION__, 'Login failure tracking disabled');
+			return false;
+		}
 
 		$wpdb->escape_by_ref($ip);
 		$wpdb->escape_by_ref($user_name);
@@ -1872,8 +1897,8 @@ Password MD5                 %5d     %s
 	 * @param array $data  the data, if any
 	 * @return void
 	 */
-	public function log($function, $msg, $data = array()) {
-		if ($data) {
+	public function log($function, $msg, $data = 'please allow logging empty stuff') {
+		if ($data != 'please allow logging empty stuff') {
 			$msg .= ": " . json_encode($data);
 		}
 		file_put_contents('/var/log/' . self::ID . '.log',
@@ -2064,7 +2089,7 @@ Password MD5                 %5d     %s
 	 * Sends an email to the blog's administrator telling them a breakin
 	 * may have occurred
 	 *
-	 * @param string $network_ip  a prior result from get_network_ip()
+	 * @param string $ip  a prior result from get_ip()
 	 * @param string $user_name  the user name from the current login form
 	 * @param string $pass_md5  the md5 hashed new password
 	 * @param array $fails  the data from get_login_fail()
@@ -2074,11 +2099,12 @@ Password MD5                 %5d     %s
 	 * @uses login_security_solution::get_notify_counts()  for some shared text
 	 * @uses wp_mail()  to send the messages
 	 */
-	protected function notify_breach($network_ip, $user_name, $pass_md5,
+	protected function notify_breach($ip, $user_name, $pass_md5,
 			$fails, $pw_force_change)
 	{
 		$this->load_plugin_textdomain();
 
+		$network_ip = $this->get_network_ip($ip);
 		$to = $this->sanitize_whitespace($this->get_admin_email());
 
 		$blog = $this->get_blogname();
@@ -2093,6 +2119,8 @@ Password MD5                 %5d     %s
 				$fails['total'], $this->options['login_fail_minutes']) . "\n\n"
 
 			. $this->get_notify_counts($network_ip, $user_name, $pass_md5, $fails);
+
+		$message .= sprintf(__("They logged in from the following IP address: %s", self::ID), $ip) . "\n\n";
 
 		if ($pw_force_change) {
 			$message .= __("The user has been logged out and will be required to confirm their identity via the password reset functionality.", self::ID) . "\n\n";
@@ -2151,7 +2179,7 @@ Password MD5                 %5d     %s
 	 * Sends an email to the blog's administrator telling them that the site
 	 * is being attacked
 	 *
-	 * @param string $network_ip  a prior result from get_network_ip()
+	 * @param string $ip  a prior result from get_ip()
 	 * @param string $user_name  the user name from the current login form
 	 * @param string $pass_md5  the md5 hashed new password
 	 * @param array $fails  the data from get_login_fail()
@@ -2160,11 +2188,12 @@ Password MD5                 %5d     %s
 	 * @uses login_security_solution::get_notify_counts()  for some shared text
 	 * @uses wp_mail()  to send the messages
 	 */
-	protected function notify_fail($network_ip, $user_name, $pass_md5,
+	protected function notify_fail($ip, $user_name, $pass_md5,
 			$fails)
 	{
 		$this->load_plugin_textdomain();
 
+		$network_ip = $this->get_network_ip($ip);
 		$to = $this->sanitize_whitespace($this->get_admin_email());
 
 		$blog = $this->get_blogname();
@@ -2179,6 +2208,8 @@ Password MD5                 %5d     %s
 				$fails['total'], $this->options['login_fail_minutes']) . "\n\n"
 
 			. $this->get_notify_counts($network_ip, $user_name, $pass_md5, $fails)
+
+			. sprintf(__("The most recent attempt came from the following IP address: %s", self::ID), $ip) . "\n\n"
 
 			. sprintf(__("The %s plugin (%s) for WordPress is repelling the attack by making their login failures take a very long time.", self::ID),
 				self::NAME, self::VERSION);
@@ -2239,7 +2270,7 @@ Password MD5                 %5d     %s
 			if ($fails['total'] == $this->options['login_fail_notify']
 				|| $this->options['login_fail_notify_multiple'])
 			{
-				$this->notify_fail($network_ip, $user_name, $pass_md5, $fails);
+				$this->notify_fail($ip, $user_name, $pass_md5, $fails);
 			}
 		}
 
@@ -2347,7 +2378,7 @@ Password MD5                 %5d     %s
 			&& !$verified_ip)
 		{
 			###$this->log(__FUNCTION__, "$user->user_login breach notify");
-			$this->notify_breach($network_ip, $user->user_login, $pass_md5,
+			$this->notify_breach($ip, $user->user_login, $pass_md5,
 					$fails, $flag & self::LOGIN_FORCE_PW_CHANGE);
 			$this->notify_breach_user($user,
 					$flag & self::LOGIN_FORCE_PW_CHANGE);
@@ -2425,8 +2456,11 @@ Password MD5                 %5d     %s
 		$uri .= 'action=' . urlencode($action);
 
 		if ($action == 'rp') {
-			$uri .= '&key=' . urlencode(@$_GET['key']);
-			$uri .= '&login=' . urlencode(@$_GET['login']);
+			if (empty($_COOKIE['wp-resetpass-' . COOKIEHASH])) {
+				// Cookie not set.  Site on WP < 3.9.2.  Do it the old way.
+				$uri .= '&key=' . urlencode(@$_GET['key']);
+				$uri .= '&login=' . urlencode(@$_GET['login']);
+			}
 		}
 
 		if ($login_msg_id) {

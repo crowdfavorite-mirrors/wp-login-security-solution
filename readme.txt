@@ -3,7 +3,7 @@ Contributors: convissor
 Donate link: https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=danielc%40analysisandsolutions%2ecom&lc=US&item_name=Donate%3a%20Login%20Security%20Solution&currency_code=USD&bn=PP%2dDonationsBF%3abtn_donateCC_LG%2egif%3aNonHosted
 Tags: login, password, passwords, strength, strong, strong passwords, password strength, idle, timeout, maintenance, security, attack, hack, lock, lockdown, ban, brute force, brute, force, authentication, xml-rpc, auth, cookie, users
 Requires at least: 3.3
-Tested up to: 3.6beta3
+Tested up to: 3.9.2
 Stable tag: trunk
 
 Security against brute force attacks by tracking IP, name, password; requiring very strong passwords. Idle timeout. Maintenance mode lockdown.
@@ -440,6 +440,16 @@ on our GitHub.
     `Translation from WordPress.`  Those phrases are already translated
     in Wordporess' core.  Leaving them untranslated here ensures
     consistency with the rest of WordPress.
+1. To start a new translation:
+
+        cd languages
+
+        # Adjust "lc" to your language code.
+        # Adjust "CC" to your country code.
+        cp login-security-solution.pot login-security-solution-lc_CC.po
+
+        # Edit the new login-security-solution-lc_CC.po file.
+
 
 = Translation Information for Developers =
 
@@ -452,9 +462,9 @@ on our GitHub.
         * `svn checkout http://i18n.svn.wordpress.org/tools/trunk/ makepot`
         * So, now you'll have:
 
-            <parent dir>
-                |- login-security-solution/
-                |- makepot/
+                parent dir
+                    |- login-security-solution/
+                    |- makepot/
 
     1. `cd login-security-solution/languages`
     1. `./makepot.sh`
@@ -469,6 +479,18 @@ on our GitHub.
 
 
 == Changelog ==
+
+= 0.45.0 (2014-08-17)
+* Adjust for password reset process for security changes in WP 3.9.2
+
+= 0.44.0 (2014-05-30) =
+* Handle mysqli usage
+* Indicate that setting "Match Time" to 0 disables slowdowns, notifications,
+and breach confirmations.
+* If "Match Time" is 0, return empty values rather than running queries.
+
+= 0.43.0 (2014-01-16) =
+* By popular demand, notification emails now include the full IP address.
 
 = 0.42.0 (2013-07-06) =
 * Have Maintenence Mode messaging say who turned it on and how to turn it off.
