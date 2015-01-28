@@ -5,12 +5,15 @@
  *
  * Description: Requires very strong passwords, repels brute force login attacks, prevents login information disclosures, expires idle sessions, notifies admins of attacks and breaches, permits administrators to disable logins for maintenance or emergency reasons and reset all passwords.
  *
- * Plugin URI: http://wordpress.org/extend/plugins/login-security-solution/
- * Version: 0.45.0
+ * Plugin URI: https://wordpress.org/plugins/login-security-solution/
+ * Version: 0.50.0
  *         (Remember to change the VERSION constant, below, as well!)
  * Author: Daniel Convissor
  * Author URI: http://www.analysisandsolutions.com/
  * License: GPLv2
+ * Network: true
+ * Text Domain: login-security-solution
+ * Domain Path: /languages
  * @package login-security-solution
  */
 
@@ -23,7 +26,7 @@ $GLOBALS['login_security_solution'] = new login_security_solution;
  * The Login Security Solution plugin enhances WordPress' security
  *
  * @package login-security-solution
- * @link http://wordpress.org/extend/plugins/login-security-solution/
+ * @link https://wordpress.org/plugins/login-security-solution/
  * @license http://www.gnu.org/licenses/gpl-2.0.html GPLv2
  * @author Daniel Convissor <danielc@analysisandsolutions.com>
  * @copyright The Analysis and Solutions Company, 2012-2014
@@ -42,7 +45,7 @@ class login_security_solution {
 	/**
 	 * This plugin's version
 	 */
-	const VERSION = '0.45.0';
+	const VERSION = '0.50.0';
 
 	/**
 	 * This plugin's table name prefix
@@ -148,10 +151,13 @@ class login_security_solution {
 		'login_fail_minutes' => 120,
 		'login_fail_tier_2' => 5,
 		'login_fail_tier_3' => 10,
+		'login_fail_tier_dos' => 500,
 		'login_fail_notify' => 50,
 		'login_fail_notify_multiple' => 0,
 		'login_fail_breach_notify' => 6,
 		'login_fail_breach_pw_force_change' => 6,
+		'login_fail_delete_interval' => 0,
+		'login_fail_delete_days' => 120,
 		'pw_change_days' => 0,
 		'pw_change_grace_period_minutes' => 15,
 		'pw_complexity_exemption_length' => 20,
@@ -249,7 +255,14 @@ class login_security_solution {
 		add_action('user_profile_update_errors',
 				array(&$this, 'user_profile_update_errors'), 999, 3);
 
-		add_action('login_form_resetpass', array(&$this, 'pw_policy_establish'));
+		if (version_compare($GLOBALS['wp_version'], '4.1', '<')) {
+			add_action('login_form_resetpass', array(&$this, 'pw_policy_establish'));
+			add_action('validate_password_reset', array(&$this, 'pw_policy_establish'));
+			add_action('personal_options', array(&$admin, 'pw_policy_establish'));
+			add_action('user_new_form_tag', array(&$admin, 'pw_policy_establish'));
+		} else {
+			add_filter('password_hint', array(&$this, 'password_hint'));
+		}
 
 		add_filter('xmlrpc_enabled', array(&$this, 'xmlrpc_enabled'));
 		add_filter('authenticate', array(&$this, 'authenticate'), 999, 3);
@@ -286,8 +299,6 @@ class login_security_solution {
 			add_action($admin_menu, array(&$admin, 'admin_menu'));
 			add_action('admin_init', array(&$admin, 'admin_init'));
 			add_filter($plugin_action_links, array(&$admin, 'plugin_action_links'));
-			add_action('personal_options', array(&$admin, 'pw_policy_establish'));
-			add_action('user_new_form_tag', array(&$admin, 'pw_policy_establish'));
 
 			if ($this->options['disable_logins']) {
 				add_action('admin_notices', array(&$admin, 'admin_notices_disable_logins'));
@@ -300,6 +311,7 @@ class login_security_solution {
 
 			// NON-STANDARD: This is for the password change page.
 			add_action($admin_menu, array(&$admin, 'admin_menu_pw_force_change'));
+			add_action('admin_head', array(&$admin, 'admin_menu_pw_force_change_hide'));
 			if (!$admin->was_pw_force_change_done()) {
 				add_action($admin_notices, array(&$admin, 'admin_notices_pw_force_change'));
 			}
@@ -323,7 +335,9 @@ class login_security_solution {
 	protected function initialize() {
 		global $wpdb;
 
-		$this->table_fail = $wpdb->get_blog_prefix(0) . $this->prefix . 'fail';
+		$prefix = $wpdb->get_blog_prefix(0);
+		$prefix = str_replace('`', '``', $prefix);
+		$this->table_fail = $prefix . $this->prefix . 'fail';
 
 		$this->key_login_msg = self::ID . '-login-msg-id';
 		$this->option_name = self::ID . '-options';
@@ -709,6 +723,23 @@ class login_security_solution {
 	}
 
 	/**
+	 * For WP >= 4.1, replaces WP's password policy text with ours
+	 *
+	 * NOTE: This method is automatically called by WordPress'
+	 * password_hint filter in wp_get_password_hint().
+	 *
+	 * @param string $hint  the output from earlier password_hint filters
+	 * @return string
+	 *
+	 * @uses login_security_solution::$options  for the pw_length and
+	 *       pw_complexity_exemption_length values
+	 */
+	public function password_hint($hint = '') {
+		$this->load_plugin_textdomain();
+		return $this->hsc_utf8(sprintf(__("The password should either be: A) at least %d characters long and contain upper and lower case letters (except languages that only have one case) plus numbers and punctuation, or B) at least %d characters long. The password can not contain words related to you or this website.", self::ID), $this->options['pw_length'], $this->options['pw_complexity_exemption_length']));
+	}
+
+	/**
 	 * Conveys the password change information to the user's metadata
 	 *
 	 * NOTE: This method is automatically called by WordPress when users
@@ -764,7 +795,7 @@ class login_security_solution {
 	}
 
 	/**
-	 * Replaces WP's password policy text with ours
+	 * For WP < 4.1, replaces WP's password policy text with ours
 	 *
 	 * NOTE: This method is automatically called by WordPress during gettext
 	 * calls on the wp-login.php, user-new.php, and user-edit.php pages.
@@ -777,11 +808,13 @@ class login_security_solution {
 	 *       pw_complexity_exemption_length values
 	 */
 	public function pw_policy_rewrite($translated, $original) {
-		$policy = 'Hint: The password should be at least seven characters long. To make it stronger, use upper and lower case letters, numbers and symbols like ! " ? $ % ^ &amp; ).';
+		$policy = array(
+			'Hint: The password should be at least seven characters long. To make it stronger, use upper and lower case letters, numbers, and symbols like ! " ? $ % ^ &amp; ).',
+			'Hint: The password should be at least seven characters long. To make it stronger, use upper and lower case letters, numbers and symbols like ! " ? $ % ^ &amp; ).',
+		);
 
-		if ($original == $policy) {
-			$this->load_plugin_textdomain();
-			$translated = $this->hsc_utf8(sprintf(__("The password should either be: A) at least %d characters long and contain upper and lower case letters (except languages that only have one case) plus numbers and punctuation, or B) at least %d characters long. The password can not contain words related to you or this website.", self::ID), $this->options['pw_length'], $this->options['pw_complexity_exemption_length']));
+		if (in_array($original,$policy)) {
+			$translated = $this->password_hint();
 		}
 
 		return $translated;
@@ -919,9 +952,11 @@ class login_security_solution {
 	 * Disconnects the database, sleeps, then reconnects the database.
 	 *
 	 * @param int $fails_total  how many falures have taken place
+	 * @param array $args  the data to pass to the
+	 *                     login_security_solution_fail_tier_dos action
 	 * @return int  the number of seconds sleept
 	 */
-	protected function call_sleep($fails_total) {
+	protected function call_sleep($fails_total, $args = array()) {
 		global $wpdb;
 
 		if ($this->sleep) {
@@ -934,8 +969,18 @@ class login_security_solution {
 			$this->sleep = rand(1, 7);
 		} elseif ($fails_total < $this->options['login_fail_tier_3']) {
 			$this->sleep = rand(4, 30);
-		} else {
+		} elseif (!$this->options['login_fail_tier_dos']
+				|| $fails_total < $this->options['login_fail_tier_dos'])
+		{
 			$this->sleep = rand(25, 60);
+		} else {
+			// Oh, boy.  Really avoid creating a Denial of Service attack.
+			$this->sleep = -1;
+			###$this->log(__FUNCTION__, $this->sleep);
+			if ($fails_total == $this->options['login_fail_tier_dos']) {
+				do_action('login_security_solution_fail_tier_dos', $args);
+			}
+			return $this->sleep;
 		}
 		###$this->log(__FUNCTION__, $this->sleep);
 
@@ -995,6 +1040,31 @@ class login_security_solution {
 		$leet   = array('!', '@', '$', '+', '1', '3', '4', '5', '6', '9', '0');
 		$normal = array('i', 'a', 's', 't', 'l', 'e', 'a', 's', 'b', 'g', 'o');
 		return str_replace($leet, $normal, $pw);
+	}
+
+	/**
+	 * Remove's records older than login_fail_delete_days from the fail table
+	 *
+	 * @return bool  true if the query succeeds, false if it fails
+	 *
+	 * @uses login_security_solution::$options  for the login_fail_delete_days
+	 *       setting
+	 */
+	protected function delete_login_fail_old() {
+		global $wpdb;
+
+		$days = $this->options['login_fail_delete_days'];
+		$wpdb->escape_by_ref($days);
+
+		$wpdb->query("DELETE FROM `$this->table_fail`
+			WHERE date_failed < DATE_SUB(CURDATE(), INTERVAL '$days' DAY)");
+
+		if ($wpdb->last_error) {
+			###$this->log(__FUNCTION__, 'query failure', $wpdb->last_error);
+			return false;
+		}
+		###$this->log(__FUNCTION__, 'success');
+		return true;
 	}
 
 	/**
@@ -1384,25 +1454,44 @@ Password MD5                 %5d     %s
 	/**
 	 * Saves the failed login's info in the database
 	 *
+	 * If the insert ID returned is divisible by this plugin's
+	 * login_fail_delete_interval option, the delete_login_fail_old() method
+	 * gets called.
+	 *
 	 * @param string $ip  a prior result from get_ip()
 	 * @param string $user_login  the user name from the current login form
 	 * @param string $pass_md5  the md5 hashed new password
 	 * @return void
+	 *
+	 * @uses login_security_solution::$options  for the
+	 *       login_fail_delete_interval setting
+	 * @uses login_security_solution::delete_login_fail_old()  to remove cruft
 	 */
 	protected function insert_fail($ip, $user_login, $pass_md5) {
 		global $wpdb;
 
 		###$this->log(__FUNCTION__, "$ip, $user_login, $pass_md5");
 
+		$args = array(
+			'ip' => $ip,
+			'user_login' => $user_login,
+			'pass_md5' => $pass_md5,
+		);
+
 		$wpdb->insert(
 			$this->table_fail,
-			array(
-				'ip' => $ip,
-				'user_login' => $user_login,
-				'pass_md5' => $pass_md5,
-			),
+			$args,
 			array('%s', '%s', '%s')
 		);
+
+		if ($this->options['login_fail_delete_interval']
+			&& $wpdb->insert_id % $this->options['login_fail_delete_interval'] == 0)
+		{
+			$this->delete_login_fail_old();
+		}
+
+		$args['options'] = $this->options;
+		do_action('login_security_solution_insert_fail', $args);
 	}
 
 	/**
@@ -2133,6 +2222,26 @@ Password MD5                 %5d     %s
 		$message .= sprintf(__("This message is from the %s plugin (%s) for WordPress.", self::ID),
 			self::NAME, self::VERSION) . "\n";
 
+		$args = array(
+			'ip' => $ip,
+			'network_ip' => $network_ip,
+			'user_login' => $user_name,
+			'pass_md5' => $pass_md5,
+			'fails' => $fails,
+			'pw_force_change' => $pw_force_change,
+			'to' => $to,
+			'blog' => $blog,
+			'options' => $this->options,
+		);
+
+		do_action('login_security_solution_notify_breach', $args);
+
+		$subject = apply_filters('login_security_solution_notify_breach_subject', $subject, $args);
+		$message = apply_filters('login_security_solution_notify_breach_message', $message, $args);
+		if (!$subject || !$message) {
+			return;
+		}
+
 		return wp_mail($to, $subject, $message);
 	}
 
@@ -2171,6 +2280,20 @@ Password MD5                 %5d     %s
 		}
 
 		$message .= sprintf(__(" * Send an email to %s letting them know it was not you who logged in.", self::ID), $this->get_admin_email()) . "\n";
+
+		$args = array(
+			'user' => $user,
+			'pw_force_change' => $pw_force_change,
+			'to' => $to,
+			'blog' => $blog,
+			'options' => $this->options,
+		);
+
+		$subject = apply_filters('login_security_solution_notify_breach_user_subject', $subject, $args);
+		$message = apply_filters('login_security_solution_notify_breach_user_message', $message, $args);
+		if (!$subject || !$message) {
+			return;
+		}
 
 		return wp_mail($to, $subject, $message);
 	}
@@ -2224,6 +2347,25 @@ Password MD5                 %5d     %s
 			$message .= "\n" . sprintf(__("Further notifications about this attacker will only be sent if the attack stops for at least %d minutes and then resumes.", self::ID), $this->options['login_fail_minutes']) . "\n";
 		}
 
+		$args = array(
+			'ip' => $ip,
+			'network_ip' => $network_ip,
+			'user_login' => $user_name,
+			'pass_md5' => $pass_md5,
+			'fails' => $fails,
+			'to' => $to,
+			'blog' => $blog,
+			'options' => $this->options,
+		);
+
+		do_action('login_security_solution_notify_fail', $args);
+
+		$subject = apply_filters('login_security_solution_notify_fail_subject', $subject, $args);
+		$message = apply_filters('login_security_solution_notify_fail_message', $message, $args);
+		if (!$subject || !$message) {
+			return;
+		}
+
 		return wp_mail($to, $subject, $message);
 	}
 
@@ -2258,9 +2400,19 @@ Password MD5                 %5d     %s
 			$this->insert_fail($ip, $user_name, $pass_md5);
 		}
 		$fails = $this->get_login_fail($network_ip, $user_name, $pass_md5);
+
+		$args = array(
+			'ip' => $ip,
+			'network_ip' => $network_ip,
+			'user_login' => $user_name,
+			'pass_md5' => $pass_md5,
+			'fails' => $fails,
+			'options' => $this->options,
+		);
+
 		if ($match) {
 			###$this->log(__FUNCTION__, "duplicate");
-			$this->call_sleep($fails['total']);
+			$this->call_sleep($fails['total'], $args);
 			return -4;
 		}
 
@@ -2274,7 +2426,7 @@ Password MD5                 %5d     %s
 			}
 		}
 
-		return $this->call_sleep($fails['total']);
+		return $this->call_sleep($fails['total'], $args);
 	}
 
 	/**

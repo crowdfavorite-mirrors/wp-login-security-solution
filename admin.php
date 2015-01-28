@@ -5,7 +5,7 @@
  * the Login Security Solution WordPress plugin
  *
  * @package login-security-solution
- * @link http://wordpress.org/extend/plugins/login-security-solution/
+ * @link https://wordpress.org/plugins/login-security-solution/
  * @license http://www.gnu.org/licenses/gpl-2.0.html GPLv2
  * @author Daniel Convissor <danielc@analysisandsolutions.com>
  * @copyright The Analysis and Solutions Company, 2012-2014
@@ -16,7 +16,7 @@
  * the Login Security Solution WordPress plugin
  *
  * @package login-security-solution
- * @link http://wordpress.org/extend/plugins/login-security-solution/
+ * @link https://wordpress.org/plugins/login-security-solution/
  * @license http://www.gnu.org/licenses/gpl-2.0.html GPLv2
  * @author Daniel Convissor <danielc@analysisandsolutions.com>
  * @copyright The Analysis and Solutions Company, 2012-2014
@@ -288,6 +288,12 @@ class login_security_solution_admin extends login_security_solution {
 				'text' => sprintf(__("How many matching login failures should it take to get into this (%d - %d second) Delay Tier? Must be > Delay Tier 2.", self::ID), 25, 60),
 				'type' => 'int',
 			),
+			'login_fail_tier_dos' => array(
+				'group' => 'login',
+				'label' => __("DoS Tier", self::ID),
+				'text' => __("How many matching login failures should it take until the plugin stops delaying responses (to avoid a Denial of Service problem)? 0 disables this feature. Must be > Delay Tier 3.", self::ID),
+				'type' => 'int',
+			),
 			'admin_email' => array(
 				'group' => 'login',
 				'label' => __("Notifications To", self::ID),
@@ -354,6 +360,19 @@ class login_security_solution_admin extends login_security_solution {
 				'text' => __("How many passwords should be remembered? Prevents reuse of old passwords. 0 disables this feature.", self::ID),
 				'type' => 'int',
 			),
+
+			'login_fail_delete_interval' => array(
+				'group' => 'retention',
+				'label' => __("Deletion Interval", self::ID),
+				'text' => sprintf(__("Run the deletion process upon every x login failures. 0 disables this feature. Suggested value: %d.", self::ID), 1000),
+				'type' => 'int',
+			),
+			'login_fail_delete_days' => array(
+				'group' => 'retention',
+				'label' => __("Deletion Days", self::ID),
+				'text' => __("Delete records older than x days.", self::ID),
+				'type' => 'int',
+			),
 		);
 	}
 
@@ -418,15 +437,21 @@ class login_security_solution_admin extends login_security_solution {
 			self::ID
 		);
 		add_settings_section(
+			self::ID . '-retention',
+			$this->hsc_utf8(__("Data Retention Policies", self::ID)),
+			array(&$this, 'section_retention'),
+			self::ID
+		);
+		add_settings_section(
 			self::ID . '-pw',
 			$this->hsc_utf8(__("Password Policies", self::ID)),
-			array(&$this, 'section_blank'),
+			'__return_empty_string',
 			self::ID
 		);
 		add_settings_section(
 			self::ID . '-misc',
 			$this->hsc_utf8(__("Miscellaneous Policies", self::ID)),
-			array(&$this, 'section_blank'),
+			'__return_empty_string',
 			self::ID
 		);
 
@@ -434,7 +459,8 @@ class login_security_solution_admin extends login_security_solution {
 		foreach ($this->fields as $id => $field) {
 			add_settings_field(
 				$id,
-				$this->hsc_utf8($field['label']),
+				'<label for="' . $this->hsc_utf8($id) . '">'
+					. $this->hsc_utf8($field['label']) . '</label>',
 				array(&$this, $id),
 				self::ID,
 				self::ID . '-' . $field['group']
@@ -464,13 +490,6 @@ class login_security_solution_admin extends login_security_solution {
 	}
 
 	/**
-	 * The callback for "rendering" the sections that don't have text
-	 * @return void
-	 */
-	public function section_blank() {
-	}
-
-	/**
 	 * The callback for rendering the "Login Failures Policy" section
 	 * @return void
 	 */
@@ -489,6 +508,16 @@ class login_security_solution_admin extends login_security_solution {
 		echo $this->hsc_utf8(__("The amount of the delay increases in higher tiers.", self::ID));
 		echo ' ';
 		echo $this->hsc_utf8(__("The delay time within each tier is randomized to complicate profiling by attackers.", self::ID));
+		echo '</p>';
+	}
+
+	/**
+	 * The callback for rendering the "Data Retention Policies" section
+	 * @return void
+	 */
+	public function section_retention() {
+		echo '<p>';
+		echo $this->hsc_utf8(sprintf(__("The means for automatically deleting old records from the %s table.", self::ID),$this->table_fail));
 		echo '</p>';
 	}
 
@@ -545,6 +574,7 @@ class login_security_solution_admin extends login_security_solution {
 		echo '<input type="text" size="3" name="'
 			. $this->hsc_utf8($this->option_name)
 			. '[' . $this->hsc_utf8($name) . ']"'
+			. ' id="' . $this->hsc_utf8($name) . '"'
 			. ' value="' . $this->hsc_utf8($this->options[$name]) . '" /> ';
 		echo $this->hsc_utf8($this->fields[$name]['text']
 				. ' ' . __('Default:', self::ID) . ' '
@@ -559,6 +589,7 @@ class login_security_solution_admin extends login_security_solution {
 		echo '<input type="text" size="75" name="'
 			. $this->hsc_utf8($this->option_name)
 			. '[' . $this->hsc_utf8($name) . ']"'
+			. ' id="' . $this->hsc_utf8($name) . '"'
 			. ' value="' . $this->hsc_utf8($this->options[$name]) . '" /> ';
 		echo '<br />';
 		echo $this->hsc_utf8($this->fields[$name]['text']
@@ -656,6 +687,18 @@ class login_security_solution_admin extends login_security_solution {
 			$out[$name] = $out['login_fail_tier_2'] + 5;
 		}
 
+		// Special check to make sure Delay Tier 4 > Delay Tier 3.
+		$name = 'login_fail_tier_dos';
+		if ($out[$name] && $out[$name] <= $out['login_fail_tier_3']) {
+			add_settings_error($this->option_name,
+					$this->hsc_utf8($name),
+					$this->hsc_utf8("'" . $this->fields[$name]['label'] . "' "
+							. sprintf($gt_format, $this->fields['login_fail_tier_3']['label'])
+							. ' ' . $default));
+
+			$out[$name] = $out['login_fail_tier_3'] + 5;
+		}
+
 		// Speical check to ensure reuse count is set if aging is enabled.
 		$name = 'pw_reuse_count';
 		if ($out['pw_change_days'] && !$out[$name]) {
@@ -685,11 +728,21 @@ class login_security_solution_admin extends login_security_solution {
 		add_submenu_page(
 			$this->page_options,
 			$this->text_pw_force_change,
-			'',
+			$this->text_pw_force_change,
 			$this->capability_required,
 			$this->option_pw_force_change_name,
 			array(&$this, 'page_pw_force_change')
 		);
+	}
+
+	/**
+	 * Tells WP not to display this item in the settings menu
+	 *
+	 * NOTE: This method is automatically called by WordPress when
+	 * any admin page is rendered
+	 */
+	public function admin_menu_pw_force_change_hide() {
+		remove_submenu_page($this->page_options, $this->option_pw_force_change_name);
 	}
 
 	/**
