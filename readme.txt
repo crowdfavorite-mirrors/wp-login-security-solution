@@ -3,7 +3,7 @@ Contributors: convissor
 Donate link: https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=danielc%40analysisandsolutions%2ecom&lc=US&item_name=Donate%3a%20Login%20Security%20Solution&currency_code=USD&bn=PP%2dDonationsBF%3abtn_donateCC_LG%2egif%3aNonHosted
 Tags: login, password, passwords, strength, strong, strong passwords, password strength, idle, timeout, maintenance, security, attack, hack, lock, lockdown, ban, brute force, brute, force, authentication, xml-rpc, auth, cookie, users
 Requires at least: 3.3
-Tested up to: 4.1
+Tested up to: 4.2
 Stable tag: trunk
 
 Security against brute force attacks by tracking IP, name, password; requiring very strong passwords. Idle timeout. Maintenance mode lockdown.
@@ -121,7 +121,9 @@ conflicts during program execution.  Please read the FAQ!
 * Italiano, Italia (Italian, Italy) (it_IT) by Daniele Passalacqua
 * 日本語, 日本国 (Japanese, Japan) (ja_JP) by [motoyamayuki](https://profiles.wordpress.org/motoyamayuki/)
 * Nederlands, Nederland (Dutch, Netherlands) (nl_NL) by Friso van Wieringen
+* polski, Polska (Polish, Poland) (pl_PL) by Michał Seweryniak [miniol](https://github.com/miniol)
 * Português, Brasil (Portugese, Brazil) (pt_BR) by Valdir Trombini
+* suomi, Suomi (Finnish, Finland) (fi_FI) by Juha Remes [Newman101](https://github.com/Newman101)
 
 
 = Source Code, Bugs, and Feature Requests =
@@ -464,9 +466,11 @@ on our GitHub.
 1. Please don't change formatting inside the `.po` file
 1. __Run `git diff` before all commits.__  Ensure only expected changes
     are being made.
-1. Do not translate items that have a comment above them saying
-    `Translation from WordPress.`  Those phrases are already translated
-    in Wordporess' core.  Leaving them untranslated here ensures
+1. Do NOT translate items that have a comment above them saying
+    `Translation from WordPress.  DO NOT TRANSLATE IT IN THIS PLUGIN.`
+    When starting a new translation, please take a look at an existing
+    `.po` file to see which strings they are.  Those phrases are already
+    translated in WordPress' core.  Leaving them untranslated here ensures
     consistency with the rest of WordPress.
 1. To start a new translation:
 
@@ -507,6 +511,12 @@ on our GitHub.
 
 
 == Changelog ==
+
+= 0.52.0 (2015-05-25) =
+* Silence safe mode warnings from is_readable()
+* Add Polish translation
+* Add Finnish translation
+* Rename Japanese translation files from `ja_JP` to `ja`
 
 = 0.51.0 (2015-03-15) =
 * Security Fixes:
